@@ -30,3 +30,9 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Wails / Frontend / Local configurations
+build/bin
+node_modules
+frontend/dist
+proxy_config.json
