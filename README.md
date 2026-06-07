@@ -5,10 +5,7 @@ Bilingual project documentation for a modern, lightweight reverse proxy server b
 本專案是一個基於 **Wails v2 (Go + Vue 3)** 開發的現代化輕量級反向代理伺服器與靜態網頁伺服器，專為開發人員解決本地跨域、靜態網站託管與多服務整合需求。
 
 <p align="center">
-  <img src="image-1.png" alt="反向代理伺服器主介面" width="750">
-</p>
-<p align="center">
-  <img src="image-2.png" alt="即時流量日誌監控介面" width="750">
+  <img src="image.png" alt="反向代理伺服器主介面" width="750">
 </p>
 
 ---
