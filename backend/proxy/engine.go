@@ -373,11 +373,12 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 5. 攔截並讀取 Request Body (限制 8KB 以防止爆記憶體，大檔案/WebSocket 自動跳過)
+	// 5. 攔截並讀取 Request Body（完整讀取以確保後端轉發不截斷；Log 記錄只保留前 8KB，大檔案/WebSocket 自動跳過）
 	var reqBodyStr string
 	var reqBodyTrunc bool
 	if !isWebSocket && r.ContentLength < 1024*1024 && r.Body != nil {
-		bodyBytes, errBytes := io.ReadAll(io.LimitReader(r.Body, 8193))
+		// 完整讀取整個 Body，避免截斷轉發內容
+		bodyBytes, errBytes := io.ReadAll(r.Body)
 		if errBytes == nil {
 			if len(bodyBytes) > 8192 {
 				reqBodyStr = string(bodyBytes[:8192])
@@ -385,6 +386,7 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			} else {
 				reqBodyStr = string(bodyBytes)
 			}
+			// 將完整的 Body 重新包裝放回，確保後續轉發給後端時是完整的
 			r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 		}
 	} else if isWebSocket {
