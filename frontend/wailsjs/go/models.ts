@@ -100,6 +100,11 @@ export namespace proxy {
 	    active: boolean;
 	    headers: Record<string, string>;
 	    healthy: boolean;
+	    keepPrefix: boolean;
+	    injectBase: boolean;
+	    redirectSlash: boolean;
+	    healthCheckEnabled?: boolean;
+	    healthCheckPath: string;
 	    // Go type: time
 	    createdAt: any;
 	
@@ -116,6 +121,11 @@ export namespace proxy {
 	        this.active = source["active"];
 	        this.headers = source["headers"];
 	        this.healthy = source["healthy"];
+	        this.keepPrefix = source["keepPrefix"];
+	        this.injectBase = source["injectBase"];
+	        this.redirectSlash = source["redirectSlash"];
+	        this.healthCheckEnabled = source["healthCheckEnabled"];
+	        this.healthCheckPath = source["healthCheckPath"];
 	        this.createdAt = this.convertValues(source["createdAt"], null);
 	    }
 	

@@ -307,6 +307,21 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 2.2 檢查是否啟用斜線重導向。若啟用且請求路徑剛好等於 rule.Source（無尾斜線），重導向到帶斜線的路徑
+	if rule.Type == RouteTypePath && rule.RedirectSlash {
+		cleanSource := strings.TrimSuffix(rule.Source, "/")
+		if path == cleanSource && !strings.HasSuffix(path, "/") {
+			targetPath := cleanSource + "/"
+			if r.URL.RawQuery != "" {
+				targetPath += "?" + r.URL.RawQuery
+			}
+			w.Header().Set("Location", targetPath)
+			w.WriteHeader(http.StatusMovedPermanently)
+			e.recordStaticLog(start, r, rule, http.StatusMovedPermanently, "[Trailing Slash Redirect]")
+			return
+		}
+	}
+
 	// 2.5 自動處理 CORS 預檢請求 (OPTIONS)
 	if r.Method == "OPTIONS" {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -403,9 +418,11 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		if rule.Type == RouteTypePath {
-			req.URL.Path = strings.TrimPrefix(req.URL.Path, rule.Source)
-			if !strings.HasPrefix(req.URL.Path, "/") {
-				req.URL.Path = "/" + req.URL.Path
+			if !rule.KeepPrefix {
+				req.URL.Path = strings.TrimPrefix(req.URL.Path, rule.Source)
+				if !strings.HasPrefix(req.URL.Path, "/") {
+					req.URL.Path = "/" + req.URL.Path
+				}
 			}
 			req.Header.Set("X-Forwarded-Prefix", rule.Source)
 		}
@@ -447,6 +464,38 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	proxy.ModifyResponse = func(resp *http.Response) error {
 		// 動態決定是否 Bypass Response Body 讀取
 		contentType := resp.Header.Get("Content-Type")
+
+		// 1. 如果設定了 InjectBase 且是 HTML，則注入 <base> 標籤（限制在 100KB 以內，防止大檔案記憶體暴漲）
+		if rule.Type == RouteTypePath && rule.InjectBase && strings.Contains(strings.ToLower(contentType), "text/html") && resp.ContentLength <= 100*1024 && resp.Body != nil {
+			bodyBytes, err := io.ReadAll(resp.Body)
+			if err == nil {
+				resp.Body.Close()
+				bodyStr := string(bodyBytes)
+
+				// 檢查是否已經有 <base> 標籤，避免重複注入
+				if !strings.Contains(strings.ToLower(bodyStr), "<base ") {
+					headIdx := strings.Index(strings.ToLower(bodyStr), "<head>")
+					if headIdx != -1 {
+						insertIdx := headIdx + len("<head>")
+						baseHref := rule.Source
+						if !strings.HasSuffix(baseHref, "/") {
+							baseHref += "/"
+						}
+						baseTag := fmt.Sprintf("\n  <base href=\"%s\">\n", baseHref)
+						newBody := bodyStr[:insertIdx] + baseTag + bodyStr[insertIdx:]
+						newBytes := []byte(newBody)
+						resp.Body = io.NopCloser(bytes.NewReader(newBytes))
+						resp.ContentLength = int64(len(newBytes))
+						resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(newBytes)))
+					} else {
+						resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+					}
+				} else {
+					resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+				}
+			}
+		}
+
 		contentLength := resp.ContentLength
 
 		if strings.Contains(contentType, "text/event-stream") ||
@@ -468,18 +517,47 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			location := resp.Header.Get("Location")
 			if location != "" {
 				prefix := strings.TrimSuffix(rule.Source, "/")
+
+				// 處理絕對網址的 Redirect (例如指向後端 http://192.168.0.xxx:8000/main/login)
+				targetURL, err := url.Parse(rule.Target)
+				if err == nil {
+					locURL, err := url.Parse(location)
+					if err == nil && locURL.Host != "" && locURL.Host == targetURL.Host {
+						// 修正 Host 為代理伺服器的 Host
+						locURL.Host = r.Host
+						if e.useTLS {
+							locURL.Scheme = "https"
+						} else {
+							locURL.Scheme = "http"
+						}
+						// 修正 Path：如果不是以 prefix/ 開頭且不等於 prefix，就補上前綴
+						if !rule.KeepPrefix {
+							if !strings.HasPrefix(locURL.Path, prefix+"/") && locURL.Path != prefix {
+								locURL.Path = prefix + locURL.Path
+							}
+						}
+						resp.Header.Set("Location", locURL.String())
+						location = locURL.String() // 更新變數以便後續相對路徑檢查跳過
+					}
+				}
+
+				// 處理相對根路徑的 Redirect (例如 /main/login)
 				if strings.HasPrefix(location, "/") && !strings.HasPrefix(location, prefix+"/") && location != prefix {
-					resp.Header.Set("Location", prefix+location)
+					if !rule.KeepPrefix {
+						resp.Header.Set("Location", prefix+location)
+					}
 				}
 			}
 
 			// 修正 Set-Cookie 的 Path 屬性
-			cookies := resp.Header.Values("Set-Cookie")
-			if len(cookies) > 0 {
-				resp.Header.Del("Set-Cookie")
-				for _, cookie := range cookies {
-					newCookie := strings.Replace(cookie, "Path=/", "Path="+rule.Source, 1)
-					resp.Header.Add("Set-Cookie", newCookie)
+			if !rule.KeepPrefix {
+				cookies := resp.Header.Values("Set-Cookie")
+				if len(cookies) > 0 {
+					resp.Header.Del("Set-Cookie")
+					for _, cookie := range cookies {
+						newCookie := strings.Replace(cookie, "Path=/", "Path="+rule.Source, 1)
+						resp.Header.Add("Set-Cookie", newCookie)
+					}
 				}
 			}
 		}

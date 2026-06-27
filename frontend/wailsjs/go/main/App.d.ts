@@ -29,4 +29,6 @@ export function StopServer():Promise<void>;
 
 export function ToggleRule(arg1:string,arg2:boolean):Promise<void>;
 
+export function UpdateRuleConfig(arg1:string,arg2:boolean,arg3:boolean,arg4:boolean,arg5:boolean,arg6:string):Promise<void>;
+
 export function UpdateRuleHeaders(arg1:string,arg2:Record<string, string>):Promise<void>;

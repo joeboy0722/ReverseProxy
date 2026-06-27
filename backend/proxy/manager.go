@@ -24,14 +24,19 @@ const (
 
 // RouteRule 定義一條轉換規則
 type RouteRule struct {
-	ID        string            `json:"id"`
-	Source    string            `json:"source"`
-	Type      RouteType         `json:"type"` // "host"、"path" 或是 "static"
-	Target    string            `json:"target"`
-	Active    bool              `json:"active"`
-	Headers   map[string]string `json:"headers"` // 自訂 Headers 注入
-	Healthy   bool              `json:"healthy"` // 執行時健康狀態，傳遞給前端用
-	CreatedAt time.Time         `json:"createdAt"`
+	ID             string            `json:"id"`
+	Source         string            `json:"source"`
+	Type           RouteType         `json:"type"` // "host"、"path" 或是 "static"
+	Target         string            `json:"target"`
+	Active         bool              `json:"active"`
+	Headers        map[string]string `json:"headers"` // 自訂 Headers 注入
+	Healthy        bool              `json:"healthy"` // 執行時健康狀態，傳遞給前端用
+	KeepPrefix     bool              `json:"keepPrefix"` // 轉發時是否保留來源前綴
+	InjectBase     bool              `json:"injectBase"` // 是否在 HTML 中注入 <base> 標籤
+	RedirectSlash  bool              `json:"redirectSlash"` // 是否自動將缺少尾部斜線的請求重導向至帶斜線路徑
+	HealthCheckEnabled *bool             `json:"healthCheckEnabled"` // 是否啟用健康檢查 (預設為 true)
+	HealthCheckPath    string            `json:"healthCheckPath"`    // 自訂健康檢查路徑 (例如 /healthz)
+	CreatedAt      time.Time         `json:"createdAt"`
 }
 
 // Manager 負責管理所有的路由規則
@@ -123,6 +128,11 @@ func ensureURLScheme(target string) string {
 }
 
 func (m *Manager) pingRule(r *RouteRule) bool {
+	// 如果關閉了健康檢查，預設直接判定為健康
+	if r.HealthCheckEnabled != nil && !*r.HealthCheckEnabled {
+		return true
+	}
+
 	if r.Type == RouteTypeStatic {
 		// 靜態目錄檢查：確認本地目錄是否存在
 		info, err := os.Stat(r.Target)
@@ -134,6 +144,13 @@ func (m *Manager) pingRule(r *RouteRule) bool {
 
 	// 網路連線檢查：使用共用 Client 發送 HTTP GET 請求
 	targetURL := ensureURLScheme(r.Target)
+	if r.HealthCheckPath != "" {
+		path := r.HealthCheckPath
+		if !strings.HasPrefix(path, "/") {
+			path = "/" + path
+		}
+		targetURL = strings.TrimSuffix(targetURL, "/") + path
+	}
 
 	resp, err := m.healthClient.Get(targetURL)
 	if err != nil {
@@ -164,8 +181,12 @@ func (m *Manager) loadRules() {
 	var loadedRules map[string]*RouteRule
 	if err := json.Unmarshal(data, &loadedRules); err == nil {
 		m.rules = loadedRules
-		// 重建快速搜尋樹
+		// 重建快速搜尋樹，並初始化相容舊資料的預設值
 		for _, r := range m.rules {
+			if r.HealthCheckEnabled == nil {
+				defaultVal := true
+				r.HealthCheckEnabled = &defaultVal
+			}
 			if r.Active {
 				if r.Type == RouteTypeHost {
 					m.hostRules[r.Source] = r
@@ -196,13 +217,18 @@ func (m *Manager) AddRule(source string, routeType RouteType, target string) (st
 
 	id := uuid.New().String()
 	rule := &RouteRule{
-		ID:        id,
-		Source:    source,
-		Type:      routeType,
-		Target:    target,
-		Active:    true, // 預設新增時就啟用
-		Headers:   make(map[string]string),
-		CreatedAt: time.Now(),
+		ID:             id,
+		Source:         source,
+		Type:           routeType,
+		Target:         target,
+		Active:             true, // 預設新增時就啟用
+		Headers:            make(map[string]string),
+		KeepPrefix:         false, // 預設移除前綴，維持原有行為
+		InjectBase:         true,  // 預設注入 Base，這樣代理網頁時就更容易成功
+		RedirectSlash:      false, // 預設關閉自動重導向斜線，避免影響 API 測試
+		HealthCheckEnabled: func() *bool { b := true; return &b }(),
+		HealthCheckPath:    "",
+		CreatedAt:          time.Now(),
 	}
 
 	m.rules[id] = rule
@@ -387,6 +413,25 @@ func (m *Manager) UpdateRuleHeaders(id string, headers map[string]string) error 
 	}
 
 	rule.Headers = headers
+	m.saveRules()
+	return nil
+}
+
+// UpdateRuleConfig 更新指定規則的代理設定
+func (m *Manager) UpdateRuleConfig(id string, keepPrefix bool, injectBase bool, redirectSlash bool, healthCheckEnabled bool, healthCheckPath string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	rule, exists := m.rules[id]
+	if !exists {
+		return errors.New("找不到指定的規則")
+	}
+
+	rule.KeepPrefix = keepPrefix
+	rule.InjectBase = injectBase
+	rule.RedirectSlash = redirectSlash
+	rule.HealthCheckEnabled = &healthCheckEnabled
+	rule.HealthCheckPath = healthCheckPath
 	m.saveRules()
 	return nil
 }

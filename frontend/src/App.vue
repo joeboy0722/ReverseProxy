@@ -4,7 +4,7 @@ import {
   GetServerStatus, StartServer, StopServer, 
   GetRules, AddRule, ToggleRule, DeleteRule,
   GetLogs, ClearLogs, GetCustomCert, SetCustomCert,
-  SelectDirectory, SelectFile, UpdateRuleHeaders
+  SelectDirectory, SelectFile, UpdateRuleHeaders, UpdateRuleConfig
 } from '../wailsjs/go/main/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 
@@ -222,9 +222,9 @@ async function handleClearCert() {
   }
 }
 
-// Headers Modal 編輯
+// Headers Modal 編輯 (升級為規則設定)
 function openHeadersModal(rule) {
-  editingRule.value = rule
+  editingRule.value = { ...rule } // 使用淺拷貝以避免即時修改清單資料
   const hdrs = []
   if (rule.headers) {
     for (const [k, v] of Object.entries(rule.headers)) {
@@ -262,10 +262,21 @@ async function handleSaveHeaders() {
   }
   try {
     await UpdateRuleHeaders(editingRule.value.id, headersMap)
+    // 非 static 類型皆更新代理設定（包含健康檢查設定）
+    if (editingRule.value.type !== 'static') {
+      await UpdateRuleConfig(
+        editingRule.value.id,
+        !!editingRule.value.keepPrefix,
+        !!editingRule.value.injectBase,
+        !!editingRule.value.redirectSlash,
+        editingRule.value.healthCheckEnabled !== false,
+        editingRule.value.healthCheckPath || ''
+      )
+    }
     showHeadersModal.value = false
     await fetchRules()
   } catch (err) {
-    alert("Failed to save headers: " + err)
+    alert("Failed to save settings: " + err)
   }
 }
 
@@ -462,12 +473,13 @@ function formatTime(timestamp) {
           </div>
 
           <div class="flex items-center gap-3 shrink-0">
-             <!-- Headers BTN -->
+             <!-- Settings BTN -->
              <button v-if="rule.type !== 'static'" @click="openHeadersModal(rule)" class="px-3 py-1 border border-slate-600 hover:border-slate-400 text-xs rounded transition-colors flex items-center gap-1 font-semibold text-slate-300 hover:text-white">
                <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                 <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                 <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                </svg>
-               Headers
+               Settings
              </button>
 
              <!-- Toggle switch -->
@@ -555,35 +567,117 @@ function formatTime(timestamp) {
       </div>
     </section>
 
-    <!-- Headers Modal -->
+    <!-- Settings Modal -->
     <div v-if="showHeadersModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center p-4 z-50 animate-fade-in">
-      <div class="bg-slate-800 rounded-xl border border-slate-700 w-full max-w-lg shadow-2xl overflow-hidden">
-        <div class="p-5 border-b border-slate-700 flex justify-between items-center bg-slate-900/40">
+      <div class="bg-slate-800 rounded-xl border border-slate-700 w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        <div class="p-5 border-b border-slate-700 flex justify-between items-center bg-slate-900/40 shrink-0">
           <div>
-            <h3 class="text-lg font-bold text-blue-300">Custom Inject Headers</h3>
-            <p class="text-xs text-slate-400 mt-1">Inject custom headers when proxying to: <span class="font-mono text-indigo-300">{{ editingRule?.source }}</span></p>
+            <h3 class="text-lg font-bold text-blue-300">
+              {{ editingRule?.type === 'path' ? 'Proxy Path Settings' : (editingRule?.type === 'host' ? 'Proxy Host Settings' : 'Proxy Rule Settings') }}
+            </h3>
+            <p class="text-xs text-slate-400 mt-1">
+              {{ editingRule?.type === 'path' ? 'Configure options and headers for path-based proxy:' : 'Configure headers for host-based proxy:' }}
+              <span class="font-mono text-indigo-300">{{ editingRule?.source }}</span>
+            </p>
           </div>
           <button @click="showHeadersModal = false" class="text-slate-400 hover:text-white transition-colors">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
 
-        <div class="p-5 max-h-[300px] overflow-y-auto flex flex-col gap-3">
-          <div v-for="(h, idx) in editingHeaders" :key="idx" class="flex gap-2 items-center">
-            <input v-model="h.key" type="text" placeholder="Key (e.g. Authorization)" class="flex-1 bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-sm outline-none focus:border-blue-500 font-mono" />
-            <span class="text-slate-600">:</span>
-            <input v-model="h.value" type="text" placeholder="Value" class="flex-1 bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-sm outline-none focus:border-blue-500 font-mono" />
-            <button @click="removeHeaderRow(idx)" class="text-slate-500 hover:text-rose-400 p-1.5 hover:bg-slate-700/50 rounded transition-all">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+        <div class="overflow-y-auto flex-1">
+          <!-- Host Mode Tips -->
+          <div v-if="editingRule && editingRule.type === 'host'" class="p-5 border-b border-slate-700/50 bg-slate-900/10 text-slate-400 text-xs">
+            <div class="flex items-start gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-blue-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div>
+                <span class="block font-semibold text-slate-300 mb-0.5">主機代理模式 (Host Proxy Mode)</span>
+                主機類型轉發會完整代理對應 Host 的所有流量，不需且不支援進行路徑前綴移除、HTML Base 標籤注入或尾部斜線修正等網頁重寫設定。
+              </div>
+            </div>
+          </div>
+
+          <!-- Web Options -->
+          <div v-if="editingRule && editingRule.type === 'path'" class="p-5 border-b border-slate-700/50 flex flex-col gap-4 bg-slate-900/10">
+            <h4 class="text-xs font-bold text-indigo-400 uppercase tracking-wider">Proxy Web Options (網頁代理設定)</h4>
+            
+            <div class="flex items-center justify-between">
+              <div class="pr-2">
+                <span class="block text-sm font-semibold text-slate-200">保留來源前綴 (Keep Prefix)</span>
+                <span class="block text-xs text-slate-400">若關閉，/web/main 會轉發為後端的 /main；若開啟，則轉發為 /web/main。</span>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer shrink-0 ml-4">
+                <input type="checkbox" v-model="editingRule.keepPrefix" class="sr-only peer">
+                <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
+            </div>
+
+            <div class="flex items-center justify-between">
+              <div class="pr-2">
+                <span class="block text-sm font-semibold text-slate-200">注入 Base 標籤 (Inject HTML Base Tag)</span>
+                <span class="block text-xs text-slate-400">當後端回傳 HTML 時，自動在 &lt;head&gt; 中注入 &lt;base&gt; 標籤，修正相對資源路徑。</span>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer shrink-0 ml-4">
+                <input type="checkbox" v-model="editingRule.injectBase" class="sr-only peer">
+                <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
+            </div>
+
+            <div class="flex items-center justify-between">
+              <div class="pr-2">
+                <span class="block text-sm font-semibold text-slate-200">重導向尾部斜線 (Redirect Slash)</span>
+                <span class="block text-xs text-slate-400">當要求無尾斜線的 /web 時，自動重導向到 /web/（API 建議關閉，網頁建議開啟）。</span>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer shrink-0 ml-4">
+                <input type="checkbox" v-model="editingRule.redirectSlash" class="sr-only peer">
+                <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
+            </div>
+          </div>
+
+          <!-- Health Check Options -->
+          <div v-if="editingRule && editingRule.type !== 'static'" class="p-5 border-b border-slate-700/50 flex flex-col gap-4 bg-slate-900/5">
+            <h4 class="text-xs font-bold text-teal-400 uppercase tracking-wider">Health Check Settings (健康檢查設定)</h4>
+            
+            <div class="flex items-center justify-between">
+              <div class="pr-2">
+                <span class="block text-sm font-semibold text-slate-200">啟用健康檢查 (Enable Health Check)</span>
+                <span class="block text-xs text-slate-400">是否定期檢測此後端伺服器的存活狀態，若關閉將預設為健康。</span>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer shrink-0 ml-4">
+                <input type="checkbox" v-model="editingRule.healthCheckEnabled" class="sr-only peer">
+                <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
+            </div>
+
+            <div v-if="editingRule.healthCheckEnabled !== false" class="flex flex-col gap-2">
+              <span class="block text-sm font-semibold text-slate-200">自訂健康檢查路徑 (Custom Ping Path)</span>
+              <span class="block text-xs text-slate-400">自訂發送檢測請求的子路徑。若為空，則直接 ping 目標主機 (例如 <code>/healthz</code> 或 <code>/api/ping</code>)。</span>
+              <input v-model="editingRule.healthCheckPath" type="text" placeholder="e.g. /healthz (預設為空，即直接 ping 目標主機)" class="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-sm outline-none focus:border-blue-500 font-mono text-slate-300" />
+            </div>
+          </div>
+
+          <!-- Headers List -->
+          <div class="p-5 flex flex-col gap-3">
+            <h4 class="text-xs font-bold text-indigo-400 uppercase tracking-wider">Inject Custom Headers (自訂注入標頭)</h4>
+            <div v-for="(h, idx) in editingHeaders" :key="idx" class="flex gap-2 items-center">
+              <input v-model="h.key" type="text" placeholder="Key (e.g. Authorization)" class="flex-1 bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-sm outline-none focus:border-blue-500 font-mono" />
+              <span class="text-slate-600">:</span>
+              <input v-model="h.value" type="text" placeholder="Value" class="flex-1 bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-sm outline-none focus:border-blue-500 font-mono" />
+              <button @click="removeHeaderRow(idx)" class="text-slate-500 hover:text-rose-400 p-1.5 hover:bg-slate-700/50 rounded transition-all">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+              </button>
+            </div>
+            <button @click="addHeaderRow" class="mt-2 text-xs text-blue-400 hover:text-blue-300 font-semibold flex items-center gap-1">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
+              Add Header Rule
             </button>
           </div>
-          <button @click="addHeaderRow" class="mt-2 text-xs text-blue-400 hover:text-blue-300 font-semibold flex items-center gap-1">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
-            Add Header Rule
-          </button>
         </div>
 
-        <div class="p-5 border-t border-slate-700 flex justify-end gap-3 bg-slate-900/20">
+        <div class="p-5 border-t border-slate-700 flex justify-end gap-3 bg-slate-900/20 shrink-0">
           <button @click="showHeadersModal = false" class="px-4 py-2 border border-slate-600 hover:border-slate-500 text-sm font-semibold rounded-md transition-colors">Cancel</button>
           <button @click="handleSaveHeaders" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-sm font-semibold rounded-md transition-colors">Save Changes</button>
         </div>

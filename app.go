@@ -93,6 +93,11 @@ func (a *App) UpdateRuleHeaders(id string, headers map[string]string) error {
 	return a.manager.UpdateRuleHeaders(id, headers)
 }
 
+// UpdateRuleConfig 更新指定規則的代理設定
+func (a *App) UpdateRuleConfig(id string, keepPrefix bool, injectBase bool, redirectSlash bool, healthCheckEnabled bool, healthCheckPath string) error {
+	return a.manager.UpdateRuleConfig(id, keepPrefix, injectBase, redirectSlash, healthCheckEnabled, healthCheckPath)
+}
+
 // GetLogs 取得記憶體中的所有即時日誌
 func (a *App) GetLogs() []*proxy.RequestLog {
 	return a.logManager.GetLogs()
