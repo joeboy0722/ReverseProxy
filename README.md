@@ -31,6 +31,47 @@ Bilingual project documentation for a modern, lightweight reverse proxy server b
   * 每 30 秒自動在背景對所有啟用的代理路徑與目錄進行健康檢查，並將連線健康狀態即時回饋至 UI 介面。
 * **Dynamic SSL/TLS Certificate Reloading / 動態 HTTPS 憑證重載**: Configure custom PEM certificates or fall back to an auto-generated self-signed certificate dynamically.
   * 支援設定並隨時重載自訂的 SSL/TLS 憑證；若無設定憑證，伺服器在啟用 HTTPS 時會自動動態產生自簽憑證（Self-Signed Certificate）以支援本地安全加密通訊。
+---
+
+## 🖥️ Command Line Interface (CLI) / 命令列互動與指令模式
+
+本專案除了 GUI 視窗介面外，也支援強大的 CLI 互動與指令模式，適用於無頭伺服器（Headless Server）、後台部署與腳本自動化管理。
+
+### How to Start CLI / 如何啟動 CLI 模式
+在終端機中，使用 `-cli` 或 `-c` 旗標啟動：
+```bash
+# 啟動並進入互動控制台
+ReverseProxy.exe -cli
+# 或簡寫
+ReverseProxy.exe -c
+```
+
+### Rapid Commands / 快速快捷指令
+您可以在啟動時直接附帶指令來快速執行任務：
+* **`ReverseProxy.exe -cli start [addr] [port] [useTLS]`**
+  * 快速啟動伺服器並**自動進入**互動式 CLI 控制台進行手動管理。
+  * 例如：`ReverseProxy.exe -cli start 127.0.0.1 9090`
+* **`ReverseProxy.exe -cli list` (或 `ls`)**
+  * 列出當前所有路由轉發規則，並在**執行完畢後自動退出程式**（適合指令行腳本整合）。
+* **`ReverseProxy.exe -cli status`**
+  * 查詢當前代理伺服器的運行狀態並自動退出。
+* **`ReverseProxy.exe -cli logs`**
+  * 列出記憶體中最新的 20 筆請求日誌並自動退出。
+* **`ReverseProxy.exe -cli clear-logs`**
+  * 清除記憶體日誌並自動退出。
+* **`ReverseProxy.exe -cli show-cert`**
+  * 顯示當前的 SSL 憑證路徑設定並自動退出。
+* **`ReverseProxy.exe -cli show-nav`**
+  * 顯示當前導航首頁自訂設定並自動退出。
+
+> [!IMPORTANT]
+> **Windows 打包特別說明 / Build Note for Windows Support**:
+> 
+> Wails 預設打包時會隱藏 Windows 的主控台視窗。若要支援 CLI 模式，您在 Windows 下打包時**必須加上 `-windowsconsole` 參數**：
+> ```bash
+> wails build -windowsconsole
+> ```
+> 如此編譯出來的程式在雙擊啟動 GUI 時仍會自動隱藏 Console，但以 `-cli` 指令啟動時則能完美在終端機中正常顯示與輸入。
 
 ---
 
@@ -77,7 +118,11 @@ wails dev
 Compile and package the application into a standalone native application (e.g., `.exe` for Windows).
 編譯並將程式打包為各平台的獨立原生安裝檔（如 Windows 下的單一執行檔）：
 ```bash
+# 預設打包（Windows 下會隱藏主控台視窗）
 wails build
+
+# Windows 下若需要支援 CLI 模式，必須加上 -windowsconsole 參數：
+wails build -windowsconsole
 ```
 
 ---

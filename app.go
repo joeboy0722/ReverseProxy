@@ -195,3 +195,13 @@ func (a *App) SaveNavConfig(navTitle, navSubtitle, themeColor string) error {
 	cfg.ThemeColor = themeColor
 	return cfg.Save()
 }
+
+// RegisterLogListener 供 CLI 註冊日誌監聽
+func (a *App) RegisterLogListener(fn func(*proxy.RequestLog)) {
+	a.logManager.RegisterListener(fn)
+}
+
+// UnregisterLogListener 供 CLI 註銷日誌監聽
+func (a *App) UnregisterLogListener() {
+	a.logManager.UnregisterListener()
+}

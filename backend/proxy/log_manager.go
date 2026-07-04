@@ -32,6 +32,7 @@ type LogManager struct {
 	logs    []*RequestLog
 	maxSize int
 	ctx     context.Context
+	onLog   func(*RequestLog)
 }
 
 // NewLogManager 建立一個新的 LogManager 實例
@@ -40,6 +41,20 @@ func NewLogManager(maxSize int) *LogManager {
 		logs:    make([]*RequestLog, 0, maxSize),
 		maxSize: maxSize,
 	}
+}
+
+// RegisterListener 註冊日誌監聽器以供 CLI 即時顯示
+func (lm *LogManager) RegisterListener(fn func(*RequestLog)) {
+	lm.mu.Lock()
+	defer lm.mu.Unlock()
+	lm.onLog = fn
+}
+
+// UnregisterListener 註銷日誌監聽器
+func (lm *LogManager) UnregisterListener() {
+	lm.mu.Lock()
+	defer lm.mu.Unlock()
+	lm.onLog = nil
 }
 
 // SetContext 設定 Wails Context 以便 EventsEmit
@@ -58,11 +73,17 @@ func (lm *LogManager) AddLog(log *RequestLog) {
 	}
 	lm.logs = append(lm.logs, log)
 	ctx := lm.ctx
+	onLog := lm.onLog
 	lm.mu.Unlock()
 
 	// 發送即時事件給前端，不佔用鎖定時間
 	if ctx != nil {
 		runtime.EventsEmit(ctx, "log:new", log)
+	}
+
+	// 若有註冊 CLI 監聽器，則呼叫它以即時輸出
+	if onLog != nil {
+		onLog(log)
 	}
 }
 

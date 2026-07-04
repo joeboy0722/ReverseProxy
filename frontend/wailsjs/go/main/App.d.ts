@@ -19,6 +19,8 @@ export function GetRules():Promise<Array<proxy.RouteRule>>;
 
 export function GetServerStatus():Promise<main.ServerStatus>;
 
+export function RegisterLogListener(arg1:any):Promise<void>;
+
 export function SaveNavConfig(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function SelectDirectory():Promise<string>;
@@ -32,6 +34,8 @@ export function StartServer(arg1:string,arg2:number,arg3:boolean):Promise<void>;
 export function StopServer():Promise<void>;
 
 export function ToggleRule(arg1:string,arg2:boolean):Promise<void>;
+
+export function UnregisterLogListener():Promise<void>;
 
 export function UpdateRuleConfig(arg1:string,arg2:boolean,arg3:boolean,arg4:boolean,arg5:boolean,arg6:string,arg7:boolean,arg8:string):Promise<void>;
 

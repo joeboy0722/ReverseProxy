@@ -34,6 +34,10 @@ export function GetServerStatus() {
   return window['go']['main']['App']['GetServerStatus']();
 }
 
+export function RegisterLogListener(arg1) {
+  return window['go']['main']['App']['RegisterLogListener'](arg1);
+}
+
 export function SaveNavConfig(arg1, arg2, arg3) {
   return window['go']['main']['App']['SaveNavConfig'](arg1, arg2, arg3);
 }
@@ -60,6 +64,10 @@ export function StopServer() {
 
 export function ToggleRule(arg1, arg2) {
   return window['go']['main']['App']['ToggleRule'](arg1, arg2);
+}
+
+export function UnregisterLogListener() {
+  return window['go']['main']['App']['UnregisterLogListener']();
 }
 
 export function UpdateRuleConfig(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {
