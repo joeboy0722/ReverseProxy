@@ -94,8 +94,8 @@ func (a *App) UpdateRuleHeaders(id string, headers map[string]string) error {
 }
 
 // UpdateRuleConfig 更新指定規則的代理設定
-func (a *App) UpdateRuleConfig(id string, keepPrefix bool, injectBase bool, redirectSlash bool, healthCheckEnabled bool, healthCheckPath string) error {
-	return a.manager.UpdateRuleConfig(id, keepPrefix, injectBase, redirectSlash, healthCheckEnabled, healthCheckPath)
+func (a *App) UpdateRuleConfig(id string, keepPrefix bool, injectBase bool, redirectSlash bool, healthCheckEnabled bool, healthCheckPath string, showInIndex bool, title string) error {
+	return a.manager.UpdateRuleConfig(id, keepPrefix, injectBase, redirectSlash, healthCheckEnabled, healthCheckPath, showInIndex, title)
 }
 
 // GetLogs 取得記憶體中的所有即時日誌
@@ -156,4 +156,42 @@ func (a *App) SelectFile(filterName, extensions string) (string, error) {
 		},
 	})
 	return file, err
+}
+
+// NavConfig 導覽首頁傳輸用結構
+type NavConfig struct {
+	NavTitle    string `json:"navTitle"`
+	NavSubtitle string `json:"navSubtitle"`
+	ThemeColor  string `json:"themeColor"`
+}
+
+// GetNavConfig 取得當前首頁導覽全域設定，若無則賦予預設值
+func (a *App) GetNavConfig() NavConfig {
+	cfg := proxy.LoadConfig()
+	title := cfg.NavTitle
+	if title == "" {
+		title = "反向代理服務導航首頁"
+	}
+	subtitle := cfg.NavSubtitle
+	if subtitle == "" {
+		subtitle = "歡迎使用自訂反向代理伺服器。以下為您已啟用且公開的轉發服務，點擊即可快速跳轉。"
+	}
+	color := cfg.ThemeColor
+	if color == "" {
+		color = "#6366f1"
+	}
+	return NavConfig{
+		NavTitle:    title,
+		NavSubtitle: subtitle,
+		ThemeColor:  color,
+	}
+}
+
+// SaveNavConfig 儲存首頁導覽全域設定
+func (a *App) SaveNavConfig(navTitle, navSubtitle, themeColor string) error {
+	cfg := proxy.LoadConfig()
+	cfg.NavTitle = navTitle
+	cfg.NavSubtitle = navSubtitle
+	cfg.ThemeColor = themeColor
+	return cfg.Save()
 }

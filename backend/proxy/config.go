@@ -7,8 +7,11 @@ import (
 
 // ProxyConfig 儲存代理伺服器的全域設定
 type ProxyConfig struct {
-	CertPath string `json:"certPath"`
-	KeyPath  string `json:"keyPath"`
+	CertPath    string `json:"certPath"`
+	KeyPath     string `json:"keyPath"`
+	NavTitle    string `json:"navTitle"`
+	NavSubtitle string `json:"navSubtitle"`
+	ThemeColor  string `json:"themeColor"`
 }
 
 // configFilename 設定檔儲存路序

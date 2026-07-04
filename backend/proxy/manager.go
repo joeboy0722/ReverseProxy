@@ -36,7 +36,9 @@ type RouteRule struct {
 	RedirectSlash  bool              `json:"redirectSlash"` // 是否自動將缺少尾部斜線的請求重導向至帶斜線路徑
 	HealthCheckEnabled *bool             `json:"healthCheckEnabled"` // 是否啟用健康檢查 (預設為 true)
 	HealthCheckPath    string            `json:"healthCheckPath"`    // 自訂健康檢查路徑 (例如 /healthz)
-	CreatedAt      time.Time         `json:"createdAt"`
+	ShowInIndex        bool              `json:"showInIndex"`        // 是否顯示在根目錄導覽網頁上
+	Title              string            `json:"title"`              // 導覽網頁上顯示的標題名稱
+	CreatedAt          time.Time         `json:"createdAt"`
 }
 
 // Manager 負責管理所有的路由規則
@@ -228,6 +230,8 @@ func (m *Manager) AddRule(source string, routeType RouteType, target string) (st
 		RedirectSlash:      false, // 預設關閉自動重導向斜線，避免影響 API 測試
 		HealthCheckEnabled: func() *bool { b := true; return &b }(),
 		HealthCheckPath:    "",
+		ShowInIndex:        false,  // 預設不顯示在導覽網頁上
+		Title:              source, // 預設使用來源名稱作為標題
 		CreatedAt:          time.Now(),
 	}
 
@@ -418,7 +422,7 @@ func (m *Manager) UpdateRuleHeaders(id string, headers map[string]string) error 
 }
 
 // UpdateRuleConfig 更新指定規則的代理設定
-func (m *Manager) UpdateRuleConfig(id string, keepPrefix bool, injectBase bool, redirectSlash bool, healthCheckEnabled bool, healthCheckPath string) error {
+func (m *Manager) UpdateRuleConfig(id string, keepPrefix bool, injectBase bool, redirectSlash bool, healthCheckEnabled bool, healthCheckPath string, showInIndex bool, title string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -432,6 +436,8 @@ func (m *Manager) UpdateRuleConfig(id string, keepPrefix bool, injectBase bool, 
 	rule.RedirectSlash = redirectSlash
 	rule.HealthCheckEnabled = &healthCheckEnabled
 	rule.HealthCheckPath = healthCheckPath
+	rule.ShowInIndex = showInIndex
+	rule.Title = title
 	m.saveRules()
 	return nil
 }

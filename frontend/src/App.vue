@@ -4,7 +4,8 @@ import {
   GetServerStatus, StartServer, StopServer, 
   GetRules, AddRule, ToggleRule, DeleteRule,
   GetLogs, ClearLogs, GetCustomCert, SetCustomCert,
-  SelectDirectory, SelectFile, UpdateRuleHeaders, UpdateRuleConfig
+  SelectDirectory, SelectFile, UpdateRuleHeaders, UpdateRuleConfig,
+  GetNavConfig, SaveNavConfig
 } from '../wailsjs/go/main/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 
@@ -26,6 +27,12 @@ const customCertPath = ref('')
 const customKeyPath = ref('')
 const showCertPanel = ref(false)
 
+// 自訂首頁導覽狀態
+const showNavPanel = ref(false)
+const navTitle = ref('')
+const navSubtitle = ref('')
+const themeColor = ref('#6366f1')
+
 // 日誌狀態
 const logs = ref([])
 const activeLogTab = ref('all') // 'all', 'error', 'static'
@@ -42,6 +49,7 @@ onMounted(async () => {
   await fetchStatus()
   await fetchRules()
   await fetchCertConfig()
+  await fetchNavConfig()
   await fetchLogs()
   
   // 訂閱即時日誌事件
@@ -86,6 +94,26 @@ async function fetchCertConfig() {
     customKeyPath.value = cert.keyPath || ''
   } catch (err) {
     console.error(err)
+  }
+}
+
+async function fetchNavConfig() {
+  try {
+    const nav = await GetNavConfig()
+    navTitle.value = nav.navTitle || ''
+    navSubtitle.value = nav.navSubtitle || ''
+    themeColor.value = nav.themeColor || '#6366f1'
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+async function handleApplyNavConfig() {
+  try {
+    await SaveNavConfig(navTitle.value.trim(), navSubtitle.value.trim(), themeColor.value.trim())
+    alert("Homepage Navigation config saved successfully!")
+  } catch (err) {
+    alert("Failed to save homepage config: " + err)
   }
 }
 
@@ -262,17 +290,17 @@ async function handleSaveHeaders() {
   }
   try {
     await UpdateRuleHeaders(editingRule.value.id, headersMap)
-    // 非 static 類型皆更新代理設定（包含健康檢查設定）
-    if (editingRule.value.type !== 'static') {
-      await UpdateRuleConfig(
-        editingRule.value.id,
-        !!editingRule.value.keepPrefix,
-        !!editingRule.value.injectBase,
-        !!editingRule.value.redirectSlash,
-        editingRule.value.healthCheckEnabled !== false,
-        editingRule.value.healthCheckPath || ''
-      )
-    }
+    // 更新代理設定（包含首頁跳轉與健康檢查設定）
+    await UpdateRuleConfig(
+      editingRule.value.id,
+      !!editingRule.value.keepPrefix,
+      !!editingRule.value.injectBase,
+      !!editingRule.value.redirectSlash,
+      editingRule.value.healthCheckEnabled !== false,
+      editingRule.value.healthCheckPath || '',
+      !!editingRule.value.showInIndex,
+      editingRule.value.title || ''
+    )
     showHeadersModal.value = false
     await fetchRules()
   } catch (err) {
@@ -322,14 +350,25 @@ function formatTime(timestamp) {
         </h1>
         <p class="text-slate-400 mt-2">Manage routing rules, static directory servers, custom SSL and view real-time traffic.</p>
       </div>
-      <button @click="showCertPanel = !showCertPanel" 
-              class="px-4 py-2 rounded-lg border border-slate-600 hover:border-slate-400 text-sm font-semibold transition-colors flex items-center gap-2"
-              :class="{'bg-slate-700': showCertPanel}">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-        </svg>
-        SSL Config
-      </button>
+      <div class="flex gap-3">
+        <button @click="showCertPanel = !showCertPanel; if(showCertPanel) showNavPanel = false" 
+                class="px-4 py-2 rounded-lg border border-slate-600 hover:border-slate-400 text-sm font-semibold transition-colors flex items-center gap-2"
+                :class="{'bg-slate-700': showCertPanel}">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+          </svg>
+          SSL Config
+        </button>
+        <button @click="showNavPanel = !showNavPanel; if(showNavPanel) showCertPanel = false" 
+                class="px-4 py-2 rounded-lg border border-slate-600 hover:border-slate-400 text-sm font-semibold transition-colors flex items-center gap-2"
+                :class="{'bg-slate-700': showNavPanel}">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+          Homepage Config
+        </button>
+      </div>
     </header>
 
     <!-- SSL Config Panel -->
@@ -358,6 +397,36 @@ function formatTime(timestamp) {
         <div class="flex justify-end gap-3 mt-2">
           <button @click="handleClearCert" class="px-4 py-2 border border-rose-500/50 hover:bg-rose-500/10 text-rose-400 font-semibold text-sm rounded-md transition-colors">Uninstall Cert</button>
           <button @click="handleApplyCert" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm rounded-md transition-colors">Apply Cert Config</button>
+        </div>
+      </section>
+    </transition>
+
+    <!-- Homepage Config Panel -->
+    <transition name="slide">
+      <section v-if="showNavPanel" class="bg-slate-800 rounded-xl p-6 shadow-xl border border-slate-700 flex flex-col gap-4">
+        <h2 class="text-xl font-semibold text-blue-300">Homepage Navigation Config</h2>
+        <p class="text-sm text-slate-400">自訂代理伺服器根路徑導覽首頁的標題、副標題與主題色彩。</p>
+        
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="flex flex-col gap-2 md:col-span-1">
+            <label class="text-xs uppercase font-semibold text-slate-400">網頁標題 (Title)</label>
+            <input v-model="navTitle" type="text" placeholder="預設：反向代理服務導航首頁" class="bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-sm outline-none text-slate-200 focus:border-blue-500" />
+          </div>
+          <div class="flex flex-col gap-2 md:col-span-1">
+            <label class="text-xs uppercase font-semibold text-slate-400">主題色彩 (Theme Color)</label>
+            <div class="flex gap-2 items-center">
+              <input v-model="themeColor" type="color" class="h-9 w-12 bg-slate-900 border border-slate-700 rounded-md cursor-pointer" />
+              <input v-model="themeColor" type="text" placeholder="#6366f1" class="flex-1 bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-sm outline-none text-slate-200 uppercase font-mono focus:border-blue-500" />
+            </div>
+          </div>
+          <div class="flex flex-col gap-2 md:col-span-3">
+            <label class="text-xs uppercase font-semibold text-slate-400">網頁副標題 (Subtitle)</label>
+            <input v-model="navSubtitle" type="text" placeholder="輸入網頁頂部顯示的副標題..." class="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-sm outline-none text-slate-200 focus:border-blue-500" />
+          </div>
+        </div>
+
+        <div class="flex justify-end gap-3 mt-2">
+          <button @click="handleApplyNavConfig" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm rounded-md transition-colors">Apply Homepage Config</button>
         </div>
       </section>
     </transition>
@@ -474,7 +543,7 @@ function formatTime(timestamp) {
 
           <div class="flex items-center gap-3 shrink-0">
              <!-- Settings BTN -->
-             <button v-if="rule.type !== 'static'" @click="openHeadersModal(rule)" class="px-3 py-1 border border-slate-600 hover:border-slate-400 text-xs rounded transition-colors flex items-center gap-1 font-semibold text-slate-300 hover:text-white">
+             <button @click="openHeadersModal(rule)" class="px-3 py-1 border border-slate-600 hover:border-slate-400 text-xs rounded transition-colors flex items-center gap-1 font-semibold text-slate-300 hover:text-white">
                <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                  <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                  <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -596,6 +665,28 @@ function formatTime(timestamp) {
                 <span class="block font-semibold text-slate-300 mb-0.5">主機代理模式 (Host Proxy Mode)</span>
                 主機類型轉發會完整代理對應 Host 的所有流量，不需且不支援進行路徑前綴移除、HTML Base 標籤注入或尾部斜線修正等網頁重寫設定。
               </div>
+            </div>
+          </div>
+
+          <!-- Homepage Link Options -->
+          <div v-if="editingRule" class="p-5 border-b border-slate-700/50 flex flex-col gap-4 bg-slate-900/20">
+            <h4 class="text-xs font-bold text-blue-400 uppercase tracking-wider">Homepage Navigation Settings (首頁導覽跳轉設定)</h4>
+            
+            <div class="flex flex-col gap-2">
+              <span class="block text-sm font-semibold text-slate-200">顯示標題名稱 (Display Title)</span>
+              <span class="block text-xs text-slate-400">在根目錄導覽網頁上顯示的自訂標題。若留空，將預設顯示來源路徑/網域。</span>
+              <input v-model="editingRule.title" type="text" placeholder="例如：我的內部系統" class="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-sm outline-none focus:border-blue-500 text-slate-300" />
+            </div>
+
+            <div class="flex items-center justify-between">
+              <div class="pr-2">
+                <span class="block text-sm font-semibold text-slate-200">顯示在首頁 (Show on Homepage)</span>
+                <span class="block text-xs text-slate-400">是否要將此跳轉連結公開顯示於反向代理的根目錄首頁。</span>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer shrink-0 ml-4">
+                <input type="checkbox" v-model="editingRule.showInIndex" class="sr-only peer">
+                <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
             </div>
           </div>
 

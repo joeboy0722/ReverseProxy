@@ -14,6 +14,22 @@ export namespace main {
 	        this.keyPath = source["keyPath"];
 	    }
 	}
+	export class NavConfig {
+	    navTitle: string;
+	    navSubtitle: string;
+	    themeColor: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new NavConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.navTitle = source["navTitle"];
+	        this.navSubtitle = source["navSubtitle"];
+	        this.themeColor = source["themeColor"];
+	    }
+	}
 	export class ServerStatus {
 	    isRunning: boolean;
 	    bindAddr: string;
@@ -105,6 +121,8 @@ export namespace proxy {
 	    redirectSlash: boolean;
 	    healthCheckEnabled?: boolean;
 	    healthCheckPath: string;
+	    showInIndex: boolean;
+	    title: string;
 	    // Go type: time
 	    createdAt: any;
 	
@@ -126,6 +144,8 @@ export namespace proxy {
 	        this.redirectSlash = source["redirectSlash"];
 	        this.healthCheckEnabled = source["healthCheckEnabled"];
 	        this.healthCheckPath = source["healthCheckPath"];
+	        this.showInIndex = source["showInIndex"];
+	        this.title = source["title"];
 	        this.createdAt = this.convertValues(source["createdAt"], null);
 	    }
 	

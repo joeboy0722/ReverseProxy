@@ -22,12 +22,20 @@ export function GetLogs() {
   return window['go']['main']['App']['GetLogs']();
 }
 
+export function GetNavConfig() {
+  return window['go']['main']['App']['GetNavConfig']();
+}
+
 export function GetRules() {
   return window['go']['main']['App']['GetRules']();
 }
 
 export function GetServerStatus() {
   return window['go']['main']['App']['GetServerStatus']();
+}
+
+export function SaveNavConfig(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SaveNavConfig'](arg1, arg2, arg3);
 }
 
 export function SelectDirectory() {
@@ -54,8 +62,8 @@ export function ToggleRule(arg1, arg2) {
   return window['go']['main']['App']['ToggleRule'](arg1, arg2);
 }
 
-export function UpdateRuleConfig(arg1, arg2, arg3, arg4, arg5, arg6) {
-  return window['go']['main']['App']['UpdateRuleConfig'](arg1, arg2, arg3, arg4, arg5, arg6);
+export function UpdateRuleConfig(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {
+  return window['go']['main']['App']['UpdateRuleConfig'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
 }
 
 export function UpdateRuleHeaders(arg1, arg2) {

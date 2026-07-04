@@ -13,9 +13,13 @@ export function GetCustomCert():Promise<main.CustomCert>;
 
 export function GetLogs():Promise<Array<proxy.RequestLog>>;
 
+export function GetNavConfig():Promise<main.NavConfig>;
+
 export function GetRules():Promise<Array<proxy.RouteRule>>;
 
 export function GetServerStatus():Promise<main.ServerStatus>;
+
+export function SaveNavConfig(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function SelectDirectory():Promise<string>;
 
@@ -29,6 +33,6 @@ export function StopServer():Promise<void>;
 
 export function ToggleRule(arg1:string,arg2:boolean):Promise<void>;
 
-export function UpdateRuleConfig(arg1:string,arg2:boolean,arg3:boolean,arg4:boolean,arg5:boolean,arg6:string):Promise<void>;
+export function UpdateRuleConfig(arg1:string,arg2:boolean,arg3:boolean,arg4:boolean,arg5:boolean,arg6:string,arg7:boolean,arg8:string):Promise<void>;
 
 export function UpdateRuleHeaders(arg1:string,arg2:Record<string, string>):Promise<void>;

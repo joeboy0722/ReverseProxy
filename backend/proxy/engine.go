@@ -16,6 +16,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"html/template"
 	"net/http/httputil"
 	"net/url"
 	"os"
@@ -299,6 +300,12 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 1. 去 Manager 尋找匹配的規則
 	rule, found := e.manager.Match(host, path)
+
+	// 防呆機制：如果訪問根路徑且 (未匹配到規則，或該規則非精準匹配 "/" 的規則，或該規則目前為未啟用)，則顯示導覽首頁，轉發優先
+	if (path == "/" || path == "") && (!found || rule.Source != "/" || !rule.Active) {
+		e.serveIndexPage(w, r)
+		return
+	}
 
 	// 2. 如果沒找到，或該規則目前被暫停，回傳 404
 	if !found || !rule.Active {
@@ -621,3 +628,586 @@ func isLocalTarget(host string) bool {
 	// 簡易判斷是否為本地目標
 	return strings.Contains(host, "localhost") || strings.Contains(host, "127.0.0.1")
 }
+
+// indexPageData 用於首頁導覽範本渲染
+type indexPageData struct {
+	Title      string
+	Subtitle   string
+	ThemeColor string
+	Rules      []RouteRule
+}
+
+// serveIndexPage 回傳科技感深色模式導覽首頁，整合健康檢查與即時過濾
+func (e *Engine) serveIndexPage(w http.ResponseWriter, r *http.Request) {
+	rules := e.manager.GetRules()
+	var visibleRules []RouteRule
+	for _, rule := range rules {
+		// 只展示啟用中且設定要顯示的規則
+		if rule.Active && rule.ShowInIndex {
+			visibleRules = append(visibleRules, rule)
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	tmpl, err := template.New("index").Parse(indexHTMLTemplate)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("500 Internal Server Error - Failed to parse navigation template"))
+		return
+	}
+
+	cfg := LoadConfig()
+	title := cfg.NavTitle
+	if title == "" {
+		title = "反向代理服務導航首頁"
+	}
+	subtitle := cfg.NavSubtitle
+	if subtitle == "" {
+		subtitle = "歡迎使用自訂反向代理伺服器。以下為您已啟用且公開的轉發服務，點擊即可快速跳轉。"
+	}
+	color := cfg.ThemeColor
+	if color == "" {
+		color = "#6366f1"
+	}
+
+	data := indexPageData{
+		Title:      title,
+		Subtitle:   subtitle,
+		ThemeColor: color,
+		Rules:      visibleRules,
+	}
+
+	_ = tmpl.Execute(w, data)
+}
+
+// indexHTMLTemplate 為精緻科技感深色模式首頁 HTML/CSS 範本
+const indexHTMLTemplate = `<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Noto+Sans+TC:wght@300;400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --theme-color: {{.ThemeColor}};
+            --bg-gradient: linear-gradient(135deg, #0f172a, {{.ThemeColor}}1a, #0f172a);
+            --card-bg: rgba(30, 41, 59, 0.4);
+            --card-border: rgba(255, 255, 255, 0.05);
+            --card-hover-border: {{.ThemeColor}}66;
+            --text-primary: #f1f5f9;
+            --text-secondary: #cbd5e1;
+            --color-healthy: #10b981;
+            --color-unhealthy: #f43f5e;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', 'Noto Sans TC', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Microsoft JhengHei", sans-serif;
+            background-color: #0b0f19; /* 堅實底色，避免透明漸變透出瀏覽器預設白色背景 */
+            background-image: var(--bg-gradient);
+            background-attachment: fixed;
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 4rem 2rem;
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        /* 背景微光裝飾 */
+        body::before {
+            content: '';
+            position: absolute;
+            width: 400px;
+            height: 400px;
+            background: radial-gradient(circle, {{.ThemeColor}}22 0%, transparent 70%);
+            top: -100px;
+            left: -100px;
+            z-index: -1;
+            filter: blur(50px);
+            pointer-events: none;
+        }
+
+        body::after {
+            content: '';
+            position: absolute;
+            width: 500px;
+            height: 500px;
+            background: radial-gradient(circle, {{.ThemeColor}}11 0%, transparent 70%);
+            bottom: -150px;
+            right: -150px;
+            z-index: -1;
+            filter: blur(60px);
+            pointer-events: none;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 3.5rem;
+            max-width: 600px;
+            z-index: 10;
+        }
+
+        h1 {
+            font-size: 3rem;
+            font-weight: 700;
+            margin-bottom: 0.8rem;
+            background: linear-gradient(135deg, #ffffff, {{.ThemeColor}}, #3dd5f3);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.05em;
+        }
+
+        header p {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            line-height: 1.6;
+        }
+
+        /* 搜尋過濾器 */
+        .search-container {
+            width: 100%;
+            max-width: 500px;
+            margin-bottom: 3rem;
+            position: relative;
+            z-index: 10;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 1rem 1.5rem;
+            padding-left: 3rem;
+            border-radius: 9999px;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--card-border);
+            color: var(--text-primary);
+            font-size: 1rem;
+            outline: none;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            backdrop-filter: blur(10px);
+        }
+
+        .search-input:focus {
+            border-color: var(--card-hover-border);
+            box-shadow: 0 0 20px {{.ThemeColor}}33;
+            background: rgba(15, 23, 42, 0.8);
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 1.2rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-secondary);
+            pointer-events: none;
+        }
+
+        /* 網格佈局 */
+        .grid-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 2rem;
+            width: 100%;
+            max-width: 1200px;
+            z-index: 10;
+        }
+
+        /* 卡片設計 */
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 1.25rem;
+            padding: 1.8rem;
+            backdrop-filter: blur(16px);
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.3);
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, {{.ThemeColor}}0d, transparent);
+            opacity: 0;
+            transition: opacity 0.4s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-6px);
+            border-color: var(--card-hover-border);
+            box-shadow: 0 20px 40px -15px {{.ThemeColor}}26, 0 0 20px {{.ThemeColor}}0d;
+        }
+
+        .card:hover::before {
+            opacity: 1;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 1.2rem;
+            position: relative;
+            z-index: 2;
+        }
+
+        .title-wrapper {
+            max-width: 75%;
+        }
+
+        .card-title {
+            font-size: 1.35rem;
+            font-weight: 600;
+            color: #ffffff;
+            margin-bottom: 0.3rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* 類型標籤 (Type Badge) */
+        .badge {
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            padding: 0.25rem 0.6rem;
+            border-radius: 9999px;
+            letter-spacing: 0.05em;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .badge-path {
+            background: rgba(99, 102, 241, 0.15);
+            color: #a5b4fc;
+            border-color: rgba(99, 102, 241, 0.3);
+        }
+
+        .badge-host {
+            background: rgba(236, 72, 153, 0.15);
+            color: #f9a8d4;
+            border-color: rgba(236, 72, 153, 0.3);
+        }
+
+        .badge-static {
+            background: rgba(20, 184, 166, 0.15);
+            color: #99f6e4;
+            border-color: rgba(20, 184, 166, 0.3);
+        }
+
+        /* 健康檢查指示燈與呼吸動畫 */
+        .status-container {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            position: relative;
+        }
+
+        .status-dot.healthy {
+            background-color: var(--color-healthy);
+            box-shadow: 0 0 10px var(--color-healthy);
+        }
+
+        .status-dot.healthy::after {
+            content: '';
+            position: absolute;
+            top: -4px;
+            left: -4px;
+            right: -4px;
+            bottom: -4px;
+            border-radius: 50%;
+            border: 1px solid var(--color-healthy);
+            animation: pulse-ping 2s infinite ease-out;
+            opacity: 0;
+        }
+
+        .status-dot.unhealthy {
+            background-color: var(--color-unhealthy);
+            box-shadow: 0 0 10px var(--color-unhealthy);
+        }
+
+        .status-dot.unhealthy::after {
+            content: '';
+            position: absolute;
+            top: -4px;
+            left: -4px;
+            right: -4px;
+            bottom: -4px;
+            border-radius: 50%;
+            border: 1px solid var(--color-unhealthy);
+            animation: pulse-ping 2.5s infinite ease-out;
+            opacity: 0;
+        }
+
+        @keyframes pulse-ping {
+            0% {
+                transform: scale(0.8);
+                opacity: 0.8;
+            }
+            100% {
+                transform: scale(2.2);
+                opacity: 0;
+            }
+        }
+
+        .status-text {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .card-body {
+            margin-bottom: 1.8rem;
+            position: relative;
+            z-index: 2;
+        }
+
+        .route-info {
+            font-family: 'Courier New', Courier, monospace;
+            background: rgba(15, 23, 42, 0.4);
+            border-radius: 0.5rem;
+            padding: 0.6rem 0.8rem;
+            font-size: 0.85rem;
+            color: #38bdf8;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border: 1px solid rgba(255, 255, 255, 0.02);
+        }
+
+        .target-url {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-top: 0.5rem;
+            display: block;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .card-footer {
+            display: flex;
+            gap: 0.8rem;
+            position: relative;
+            z-index: 2;
+        }
+
+        /* 按鈕設計 */
+        .btn {
+            flex: 1;
+            padding: 0.75rem 1rem;
+            border-radius: 0.75rem;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: center;
+            text-decoration: none;
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.4rem;
+            outline: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--theme-color), {{.ThemeColor}}dd);
+            color: #ffffff;
+            border: none;
+            box-shadow: 0 4px 12px {{.ThemeColor}}44;
+        }
+
+        .btn-primary:hover {
+            background: linear-gradient(135deg, {{.ThemeColor}}dd, {{.ThemeColor}}bb);
+            box-shadow: 0 6px 16px {{.ThemeColor}}66;
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-primary);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        /* 複製提示彈窗 */
+        .toast {
+            position: fixed;
+            bottom: 2rem;
+            background: rgba(16, 185, 129, 0.9);
+            color: white;
+            padding: 0.8rem 1.6rem;
+            border-radius: 9999px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            box-shadow: 0 10px 25px rgba(16, 185, 129, 0.3);
+            backdrop-filter: blur(10px);
+            z-index: 100;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            pointer-events: none;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .empty-state {
+            grid-column: 1 / -1;
+            text-align: center;
+            padding: 5rem 2rem;
+            background: var(--card-bg);
+            border: 1px dashed rgba(255, 255, 255, 0.1);
+            border-radius: 1.25rem;
+            backdrop-filter: blur(16px);
+        }
+
+        .empty-state p {
+            color: var(--text-secondary);
+            margin-top: 1rem;
+        }
+
+        .empty-state svg {
+            color: var(--text-secondary);
+            opacity: 0.5;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>{{.Title}}</h1>
+        <p>{{.Subtitle}}</p>
+    </header>
+
+    <div class="search-container">
+        <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" class="search-input" id="searchInput" placeholder="搜尋轉發規則名稱或路徑..." oninput="filterCards()">
+    </div>
+
+    <div class="grid-container" id="gridContainer">
+        {{range .Rules}}
+        <div class="card" data-title="{{.Title}}" data-source="{{.Source}}">
+            <div>
+                <div class="card-header">
+                    <div class="title-wrapper">
+                        <div class="card-title">{{if .Title}}{{.Title}}{{else}}{{.Source}}{{end}}</div>
+                        <div class="status-container">
+                            <span class="status-dot {{if .Healthy}}healthy{{else}}unhealthy{{end}}"></span>
+                            <span class="status-text">{{if .Healthy}}Online{{else}}Offline{{end}}</span>
+                        </div>
+                    </div>
+                    <span class="badge {{if eq .Type "host"}}badge-host{{else if eq .Type "path"}}badge-path{{else}}badge-static{{end}}">
+                        {{.Type}}
+                    </span>
+                </div>
+                <div class="card-body">
+                    <div class="route-info">
+                        <span>{{.Source}}</span>
+                    </div>
+                    <span class="target-url" title="轉發目標: {{.Target}}">Proxy to: {{.Target}}</span>
+                </div>
+            </div>
+            <div class="card-footer">
+                <button class="btn btn-secondary" onclick="copyLink('{{.Source}}', '{{.Type}}')">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    複製
+                </button>
+                <a class="btn btn-primary" href="{{if eq .Type "host"}}http://{{.Source}}{{else}}{{.Source}}{{end}}" target="_blank">
+                    進入服務
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>
+                </a>
+            </div>
+        </div>
+        {{else}}
+        <div class="empty-state">
+            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+            <p>目前沒有設定或啟用任何顯示在首頁的轉發規則。</p>
+        </div>
+        {{end}}
+    </div>
+
+    <div class="toast" id="toast">連結複製成功！</div>
+
+    <script>
+        function filterCards() {
+            const query = document.getElementById('searchInput').value.toLowerCase().trim();
+            const cards = document.querySelectorAll('.card');
+            let hasVisible = false;
+
+            cards.forEach(card => {
+                const title = card.getAttribute('data-title').toLowerCase();
+                const source = card.getAttribute('data-source').toLowerCase();
+                if (title.includes(query) || source.includes(query)) {
+                    card.style.display = 'flex';
+                    hasVisible = true;
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+
+            // 處理搜尋不到結果時的 empty state
+            let emptyState = document.getElementById('searchEmptyState');
+            if (!hasVisible && query !== '') {
+                if (!emptyState) {
+                    emptyState = document.createElement('div');
+                    emptyState.id = 'searchEmptyState';
+                    emptyState.className = 'empty-state';
+                    emptyState.innerHTML = '<p>沒有找到符合搜尋條件的服務。</p>';
+                    document.getElementById('gridContainer').appendChild(emptyState);
+                }
+            } else if (emptyState) {
+                emptyState.remove();
+            }
+        }
+
+        function copyLink(source, type) {
+            let url = '';
+            if (type === 'host') {
+                url = 'http://' + source;
+            } else {
+                url = window.location.origin + (source.startsWith('/') ? '' : '/') + source;
+            }
+
+            navigator.clipboard.writeText(url).then(() => {
+                showToast();
+            }).catch(err => {
+                console.error('複製失敗:', err);
+            });
+        }
+
+        function showToast() {
+            const toast = document.getElementById('toast');
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 2000);
+        }
+    </script>
+</body>
+</html>`
+
