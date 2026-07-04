@@ -3,6 +3,7 @@ package proxy
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 )
 
 // ProxyConfig 儲存代理伺服器的全域設定
@@ -14,12 +15,18 @@ type ProxyConfig struct {
 	ThemeColor  string `json:"themeColor"`
 }
 
-// configFilename 設定檔儲存路序
-const configFilename = "proxy_config.json"
+// getConfigPath 取得全域設定檔的絕對路徑
+func getConfigPath() string {
+	exeDir := getExeDir()
+	if exeDir == "" {
+		return "proxy_config.json"
+	}
+	return filepath.Join(exeDir, "proxy_config.json")
+}
 
 // LoadConfig 從檔案載入設定，若檔案不存在則回傳預設設定
 func LoadConfig() *ProxyConfig {
-	data, err := os.ReadFile(configFilename)
+	data, err := os.ReadFile(getConfigPath())
 	if err != nil {
 		// 檔案不存在或無法讀取，回傳空白設定
 		return &ProxyConfig{}
@@ -38,5 +45,5 @@ func (c *ProxyConfig) Save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(configFilename, data, 0644)
+	return os.WriteFile(getConfigPath(), data, 0644)
 }

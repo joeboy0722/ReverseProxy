@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -66,11 +67,17 @@ func NewManager() *Manager {
 		Timeout:   3 * time.Second,
 	}
 
+	exeDir := getExeDir()
+	rulesFilename := "routes.json"
+	if exeDir != "" {
+		rulesFilename = filepath.Join(exeDir, "routes.json")
+	}
+
 	m := &Manager{
 		rules:           make(map[string]*RouteRule),
 		hostRules:       make(map[string]*RouteRule),
 		pathRules:       make(map[string]*RouteRule),
-		filename:        "routes.json",
+		filename:        rulesFilename,
 		stopHealthCheck: make(chan struct{}),
 		healthClient:    healthClient,
 	}
