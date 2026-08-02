@@ -11,12 +11,12 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
+	"html/template"
 	"io"
 	"log"
 	"math/big"
 	"net"
 	"net/http"
-	"html/template"
 	"net/http/httputil"
 	"net/url"
 	"os"
@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/crypto/acme/autocert"
 )
 
 // Engine 負責真正啟動 Web Server 與轉發請求
@@ -43,6 +44,10 @@ type Engine struct {
 	transport   *http.Transport
 	certPath    string
 	keyPath     string
+	certMode    string            // 憑證模式: "self-signed", "custom", "acme"
+	acmeDomain  string            // ACME 綁定網域
+	acmeEmail   string            // ACME 通知 Email
+	autocertMgr *autocert.Manager // Let's Encrypt 自動憑證管理器
 	currentCert *tls.Certificate
 }
 
@@ -53,7 +58,7 @@ func NewEngine(manager *Manager, logManager *LogManager) *Engine {
 	t.MaxIdleConnsPerHost = 100
 	t.MaxConnsPerHost = 0
 	t.IdleConnTimeout = 90 * time.Second
-	
+
 	return &Engine{
 		manager:    manager,
 		logManager: logManager,
@@ -102,17 +107,36 @@ func (e *Engine) Start(bindAddr string, port int, useTLS bool) error {
 		}
 
 		if useTLS {
-			// 動態載入憑證的設定，若尚未載入自訂憑證則自動 Fallback 產生自簽憑證
+			// 動態載入憑證的設定，支援自簽憑證、自訂檔案與 Let's Encrypt 自動憑證
 			tlsConfig := &tls.Config{
 				GetCertificate: func(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
 					e.mu.Lock()
-					defer e.mu.Unlock()
+					mode := e.certMode
+					acmeMgr := e.autocertMgr
+					currCert := e.currentCert
+					e.mu.Unlock()
 
-					if e.currentCert != nil {
+					// 若啟用 Let's Encrypt 自動憑證模式
+					if mode == "acme" && acmeMgr != nil {
+						cert, err := acmeMgr.GetCertificate(info)
+						if err == nil {
+							return cert, nil
+						}
+						log.Printf("[ACME Warning] 嘗試取得 Let's Encrypt 憑證失敗: %v (可能因 80 埠未開放、網域 DNS 未解析或無法從公網存取)，將暫時降級使用自簽憑證", err)
+					}
+
+					// 若啟用自訂憑證檔案模式
+					if mode == "custom" && currCert != nil {
+						return currCert, nil
+					}
+
+					// 預設或 Fallback 到動態自簽憑證
+					e.mu.Lock()
+					defer e.mu.Unlock()
+					if e.currentCert != nil && (mode == "" || mode == "self-signed" || mode == "custom") {
 						return e.currentCert, nil
 					}
 
-					// Fallback 到動態自簽憑證
 					cert, err := generateSelfSignedCert()
 					if err != nil {
 						return nil, err
@@ -121,9 +145,15 @@ func (e *Engine) Start(bindAddr string, port int, useTLS bool) error {
 					return e.currentCert, nil
 				},
 			}
+			e.mu.Lock()
+			if e.autocertMgr != nil {
+				tlsConfig.NextProtos = append(tlsConfig.NextProtos, "acme-tls/1")
+			}
+			e.mu.Unlock()
+
 			e.server.TLSConfig = tlsConfig
 
-			log.Printf("反向代理伺服器啟動於 https://%s (支援憑證重載)", addr)
+			log.Printf("反向代理伺服器啟動於 https://%s (支援憑證重載與 ACME 自動憑證)", addr)
 			if err := e.server.ServeTLS(ln, "", ""); err != nil && err != http.ErrServerClosed {
 				log.Printf("代理伺服器例外關閉: %v\n", err)
 			}
@@ -133,7 +163,7 @@ func (e *Engine) Start(bindAddr string, port int, useTLS bool) error {
 				log.Printf("代理伺服器例外關閉: %v\n", err)
 			}
 		}
-		
+
 		e.mu.Lock()
 		e.isRunning = false
 		e.mu.Unlock()
@@ -142,27 +172,145 @@ func (e *Engine) Start(bindAddr string, port int, useTLS bool) error {
 	return nil
 }
 
-// ReloadTLSConfig 動態載入/重載自訂的 TLS 憑證
-func (e *Engine) ReloadTLSConfig(certPath, keyPath string) error {
+// ReloadTLSConfig 動態載入/重載自訂或 Let's Encrypt 的 TLS 憑證
+func (e *Engine) ReloadTLSConfig(certPath, keyPath, certMode, acmeDomain, acmeEmail string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	e.certPath = certPath
 	e.keyPath = keyPath
+	if certMode == "" {
+		if certPath != "" && keyPath != "" {
+			certMode = "custom"
+		} else {
+			certMode = "self-signed"
+		}
+	}
+	e.certMode = certMode
+	e.acmeDomain = acmeDomain
+	e.acmeEmail = acmeEmail
 
-	if certPath != "" && keyPath != "" {
+	if certMode == "custom" && certPath != "" && keyPath != "" {
 		cert, err := tls.LoadX509KeyPair(certPath, keyPath)
 		if err != nil {
 			return fmt.Errorf("載入憑證失敗: %v", err)
 		}
 		e.currentCert = &cert
+		e.autocertMgr = nil
 		log.Printf("成功載入自訂憑證: %s", certPath)
+	} else if certMode == "acme" && strings.TrimSpace(acmeDomain) != "" {
+		e.currentCert = nil
+		domains := strings.Split(acmeDomain, ",")
+		for i, d := range domains {
+			domains[i] = strings.TrimSpace(d)
+		}
+		cacheDir := filepath.Join(getExeDir(), "certs_cache")
+		_ = os.MkdirAll(cacheDir, 0700)
+
+		e.autocertMgr = &autocert.Manager{
+			Prompt:     autocert.AcceptTOS,
+			HostPolicy: autocert.HostWhitelist(domains...),
+			Cache:      autocert.DirCache(cacheDir),
+			Email:      strings.TrimSpace(acmeEmail),
+		}
+		log.Printf("已啟用 Let's Encrypt ACME 自動憑證，綁定網域: %v", domains)
 	} else {
 		// 卸載憑證，重設為 nil，下次會 Fallback 到自簽憑證
 		e.currentCert = nil
-		log.Println("已卸載自訂憑證，將還原使用自簽憑證")
+		e.autocertMgr = nil
+		e.certMode = "self-signed"
+		log.Println("已切換使用預設動態自簽憑證")
 	}
 	return nil
+}
+
+// CertStatusInfo 傳遞至前端的憑證詳細狀態
+type CertStatusInfo struct {
+	Mode          string `json:"mode"`
+	IsActive      bool   `json:"isActive"`
+	Issuer        string `json:"issuer"`
+	Subject       string `json:"subject"`
+	NotAfter      string `json:"notAfter"`
+	DaysRemaining int    `json:"daysRemaining"`
+	Message       string `json:"message"`
+}
+
+// GetCertStatusInfo 檢查目前憑證狀態
+func (e *Engine) GetCertStatusInfo() CertStatusInfo {
+	e.mu.Lock()
+	mode := e.certMode
+	domain := e.acmeDomain
+	certPath := e.certPath
+	e.mu.Unlock()
+
+	if mode == "acme" {
+		firstDomain := strings.TrimSpace(strings.Split(domain, ",")[0])
+		if firstDomain == "" {
+			return CertStatusInfo{
+				Mode:     "acme",
+				IsActive: false,
+				Message:  "⚠️ 未填寫綁定網域，無法向 Let's Encrypt 申請憑證",
+			}
+		}
+
+		// 檢查本地快取目錄是否有簽發好的憑證檔（避免呼叫 GetCertificate 觸發網路請求與 Let's Encrypt 頻率限制）
+		cacheDir := filepath.Join(getExeDir(), "certs_cache")
+		cachePath := filepath.Join(cacheDir, firstDomain)
+		data, err := os.ReadFile(cachePath)
+		if err == nil {
+			// autocert 的快取檔同時包含 PRIVATE KEY 與 CERTIFICATE 區塊，需循環找到 CERTIFICATE
+			rest := data
+			for {
+				var block *pem.Block
+				block, rest = pem.Decode(rest)
+				if block == nil {
+					break
+				}
+				if block.Type == "CERTIFICATE" {
+					cert, parseErr := x509.ParseCertificate(block.Bytes)
+					if parseErr == nil {
+						days := int(time.Until(cert.NotAfter).Hours() / 24)
+						return CertStatusInfo{
+							Mode:          "acme",
+							IsActive:      true,
+							Issuer:        cert.Issuer.CommonName,
+							Subject:       cert.Subject.CommonName,
+							NotAfter:      cert.NotAfter.Format("2006-01-02 15:04"),
+							DaysRemaining: days,
+							Message:       fmt.Sprintf("🟢 憑證已成功簽發並生效中！(簽發機構：%s，剩餘效期：%d 天)", cert.Issuer.CommonName, days),
+						}
+					}
+				}
+			}
+		}
+
+		// 快取中尚無憑證，代表尚未完成 ACME 驗證
+		return CertStatusInfo{
+			Mode:     "acme",
+			Subject:  firstDomain,
+			IsActive: false,
+			Message:  fmt.Sprintf("🟡 等待簽發中... 當前綁定網域：%s。請確認 Port 80/443 已開放且域名已指向本機 IP。", firstDomain),
+		}
+	}
+
+	if mode == "custom" {
+		if certPath != "" {
+			return CertStatusInfo{
+				Mode:     "custom",
+				IsActive: true,
+				Subject:  certPath,
+				Message:  fmt.Sprintf("✅ 已載入自訂憑證檔案：%s", certPath),
+			}
+		}
+	}
+
+	return CertStatusInfo{
+		Mode:     "self-signed",
+		IsActive: true,
+		Issuer:   "Local Self-Signed CA",
+		Subject:  "localhost",
+		Message:  "🛡️ 使用預設動態自簽憑證 (適合內網與開發測試)",
+	}
 }
 
 // Stop 停止反向代理伺服器
@@ -294,6 +442,17 @@ func (e *Engine) recordStaticLog(start time.Time, r *http.Request, rule *RouteRu
 
 // ServeHTTP 攔截所有進來的請求，並根據 Manager 的路由規則進行轉發
 func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// 0. 若為 Let's Encrypt HTTP-01 挑戰請求 (.well-known/acme-challenge/)，由 autocert 處理
+	if strings.HasPrefix(r.URL.Path, "/.well-known/acme-challenge/") {
+		e.mu.Lock()
+		acmeMgr := e.autocertMgr
+		e.mu.Unlock()
+		if acmeMgr != nil {
+			acmeMgr.HTTPHandler(nil).ServeHTTP(w, r)
+			return
+		}
+	}
+
 	host := r.Host
 	path := r.URL.Path
 	start := time.Now()
@@ -314,10 +473,10 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2.2 檢查是否啟用斜線重導向。若啟用且請求路徑剛好等於 rule.Source（無尾斜線），重導向到帶斜線的路徑
-	if rule.Type == RouteTypePath && rule.RedirectSlash {
-		cleanSource := strings.TrimSuffix(rule.Source, "/")
-		if path == cleanSource && !strings.HasSuffix(path, "/") {
+	// 2.2 檢查是否需要斜線重導向。當存取靜態目錄如 /aa_text 時，自動重導向至 /aa_text/，確保瀏覽器相對路徑解析正確
+	cleanSource := strings.TrimSuffix(rule.Source, "/")
+	if cleanSource != "" && (rule.Type == RouteTypeStatic || (rule.Type == RouteTypePath && rule.RedirectSlash)) {
+		if path == cleanSource {
 			targetPath := cleanSource + "/"
 			if r.URL.RawQuery != "" {
 				targetPath += "?" + r.URL.RawQuery
@@ -1210,4 +1369,3 @@ const indexHTMLTemplate = `<!DOCTYPE html>
     </script>
 </body>
 </html>`
-

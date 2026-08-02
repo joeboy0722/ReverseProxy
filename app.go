@@ -22,11 +22,9 @@ func NewApp() *App {
 	mgr := proxy.NewManager()
 	engine := proxy.NewEngine(mgr, logMgr)
 
-	// 載入持久化的自訂憑證
+	// 載入持久化的 TLS 憑證與 ACME 設定
 	cfg := proxy.LoadConfig()
-	if cfg.CertPath != "" && cfg.KeyPath != "" {
-		_ = engine.ReloadTLSConfig(cfg.CertPath, cfg.KeyPath)
-	}
+	_ = engine.ReloadTLSConfig(cfg.CertPath, cfg.KeyPath, cfg.CertMode, cfg.ACMEDomain, cfg.ACMEEmail)
 
 	return &App{
 		manager:    mgr,
@@ -108,32 +106,63 @@ func (a *App) ClearLogs() {
 	a.logManager.ClearLogs()
 }
 
-// SetCustomCert 設定並啟用自訂 TLS 憑證
-func (a *App) SetCustomCert(certPath, keyPath string) error {
-	err := a.engine.ReloadTLSConfig(certPath, keyPath)
+// SetCertConfig 設定並套用 TLS 憑證設定
+func (a *App) SetCertConfig(certMode, certPath, keyPath, acmeDomain, acmeEmail string) error {
+	err := a.engine.ReloadTLSConfig(certPath, keyPath, certMode, acmeDomain, acmeEmail)
 	if err != nil {
 		return err
 	}
 
 	cfg := proxy.LoadConfig()
+	cfg.CertMode = certMode
 	cfg.CertPath = certPath
 	cfg.KeyPath = keyPath
+	cfg.ACMEDomain = acmeDomain
+	cfg.ACMEEmail = acmeEmail
 	return cfg.Save()
+}
+
+// SetCustomCert 舊版相容介面
+func (a *App) SetCustomCert(certPath, keyPath string) error {
+	mode := "custom"
+	if certPath == "" && keyPath == "" {
+		mode = "self-signed"
+	}
+	return a.SetCertConfig(mode, certPath, keyPath, "", "")
 }
 
 // CustomCert 儲存憑證回傳格式
 type CustomCert struct {
-	CertPath string `json:"certPath"`
-	KeyPath  string `json:"keyPath"`
+	CertMode   string `json:"certMode"`
+	CertPath   string `json:"certPath"`
+	KeyPath    string `json:"keyPath"`
+	ACMEDomain string `json:"acmeDomain"`
+	ACMEEmail  string `json:"acmeEmail"`
 }
 
 // GetCustomCert 取得目前儲存的憑證設定
 func (a *App) GetCustomCert() CustomCert {
 	cfg := proxy.LoadConfig()
-	return CustomCert{
-		CertPath: cfg.CertPath,
-		KeyPath:  cfg.KeyPath,
+	mode := cfg.CertMode
+	if mode == "" {
+		if cfg.CertPath != "" && cfg.KeyPath != "" {
+			mode = "custom"
+		} else {
+			mode = "self-signed"
+		}
 	}
+	return CustomCert{
+		CertMode:   mode,
+		CertPath:   cfg.CertPath,
+		KeyPath:    cfg.KeyPath,
+		ACMEDomain: cfg.ACMEDomain,
+		ACMEEmail:  cfg.ACMEEmail,
+	}
+}
+
+// GetCertStatus 取得憑證即時狀態資訊
+func (a *App) GetCertStatus() proxy.CertStatusInfo {
+	return a.engine.GetCertStatusInfo()
 }
 
 // SelectDirectory 提供 UI 選取本地目錄

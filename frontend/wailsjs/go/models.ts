@@ -1,8 +1,11 @@
 export namespace main {
 	
 	export class CustomCert {
+	    certMode: string;
 	    certPath: string;
 	    keyPath: string;
+	    acmeDomain: string;
+	    acmeEmail: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new CustomCert(source);
@@ -10,8 +13,11 @@ export namespace main {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.certMode = source["certMode"];
 	        this.certPath = source["certPath"];
 	        this.keyPath = source["keyPath"];
+	        this.acmeDomain = source["acmeDomain"];
+	        this.acmeEmail = source["acmeEmail"];
 	    }
 	}
 	export class NavConfig {
@@ -51,6 +57,30 @@ export namespace main {
 
 export namespace proxy {
 	
+	export class CertStatusInfo {
+	    mode: string;
+	    isActive: boolean;
+	    issuer: string;
+	    subject: string;
+	    notAfter: string;
+	    daysRemaining: number;
+	    message: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CertStatusInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.mode = source["mode"];
+	        this.isActive = source["isActive"];
+	        this.issuer = source["issuer"];
+	        this.subject = source["subject"];
+	        this.notAfter = source["notAfter"];
+	        this.daysRemaining = source["daysRemaining"];
+	        this.message = source["message"];
+	    }
+	}
 	export class RequestLog {
 	    id: string;
 	    // Go type: time

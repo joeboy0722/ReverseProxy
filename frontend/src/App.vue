@@ -3,7 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { 
   GetServerStatus, StartServer, StopServer, 
   GetRules, AddRule, ToggleRule, DeleteRule,
-  GetLogs, ClearLogs, GetCustomCert, SetCustomCert,
+  GetLogs, ClearLogs, GetCustomCert, SetCustomCert, SetCertConfig, GetCertStatus,
   SelectDirectory, SelectFile, UpdateRuleHeaders, UpdateRuleConfig,
   GetNavConfig, SaveNavConfig
 } from '../wailsjs/go/main/App'
@@ -23,8 +23,12 @@ const newRouteType = ref('path') // 'host', 'path', or 'static'
 const newTarget = ref('')
 
 // 自訂憑證狀態
+const certMode = ref('self-signed') // 'self-signed', 'custom', 'acme'
 const customCertPath = ref('')
 const customKeyPath = ref('')
+const acmeDomain = ref('')
+const acmeEmail = ref('')
+const certStatus = ref(null)
 const showCertPanel = ref(false)
 
 // 自訂首頁導覽狀態
@@ -51,6 +55,7 @@ onMounted(async () => {
   await fetchCertConfig()
   await fetchNavConfig()
   await fetchLogs()
+  await fetchCertStatus()
   
   // 訂閱即時日誌事件
   EventsOn('log:new', (log) => {
@@ -64,9 +69,12 @@ onMounted(async () => {
     logs.value = []
   })
   
-  // 定期刷新規則列表以獲取健康狀態
+  // 定期刷新規則列表與憑證狀態
   setInterval(async () => {
     await fetchRules()
+    if (showCertPanel.value) {
+      await fetchCertStatus()
+    }
   }, 5000)
 })
 
@@ -87,11 +95,23 @@ async function fetchStatus() {
   }
 }
 
+async function fetchCertStatus() {
+  try {
+    certStatus.value = await GetCertStatus()
+  } catch (err) {
+    console.error(err)
+  }
+}
+
 async function fetchCertConfig() {
   try {
     const cert = await GetCustomCert()
+    certMode.value = cert.certMode || (cert.certPath && cert.keyPath ? 'custom' : 'self-signed')
     customCertPath.value = cert.certPath || ''
     customKeyPath.value = cert.keyPath || ''
+    acmeDomain.value = cert.acmeDomain || ''
+    acmeEmail.value = cert.acmeEmail || ''
+    await fetchCertStatus()
   } catch (err) {
     console.error(err)
   }
@@ -229,24 +249,41 @@ async function handleBrowseKey() {
   }
 }
 
-// 儲存憑證
+// 儲存與套用憑證設定
 async function handleApplyCert() {
   try {
-    await SetCustomCert(customCertPath.value.trim(), customKeyPath.value.trim())
-    alert("TLS Certificate config saved and applied successfully!")
+    await SetCertConfig(
+      certMode.value,
+      customCertPath.value.trim(),
+      customKeyPath.value.trim(),
+      acmeDomain.value.trim(),
+      acmeEmail.value.trim()
+    )
+    await fetchCertStatus()
+    let msg = "憑證設定已成功儲存並動態套用！"
+    if (certMode.value === 'acme') {
+      msg = "Let's Encrypt 90天 ACME 自動簽發與續約憑證功能已成功啟用！"
+    } else if (certMode.value === 'self-signed') {
+      msg = "已切換為預設動態自簽憑證模式。"
+    }
+    alert(msg)
   } catch (err) {
-    alert("Failed to apply certificate: " + err)
+    alert("套用憑證設定失敗: " + err)
   }
 }
 
 async function handleClearCert() {
   try {
-    await SetCustomCert("", "")
-    customCertPath.value = ""
-    customKeyPath.value = ""
-    alert("Custom TLS Certificate removed. Fallback to self-signed cert.")
+    certMode.value = 'self-signed'
+    customCertPath.value = ''
+    customKeyPath.value = ''
+    acmeDomain.value = ''
+    acmeEmail.value = ''
+    await SetCertConfig('self-signed', '', '', '', '')
+    await fetchCertStatus()
+    alert("已重置憑證設定，還原使用預設自簽憑證 (Self-Signed Cert)。")
   } catch (err) {
-    alert("Failed to clear certificate: " + err)
+    alert("還原憑證失敗: " + err)
   }
 }
 
@@ -374,29 +411,110 @@ function formatTime(timestamp) {
     <!-- SSL Config Panel -->
     <transition name="slide">
       <section v-if="showCertPanel" class="bg-slate-800 rounded-xl p-6 shadow-xl border border-slate-700 flex flex-col gap-4">
-        <h2 class="text-xl font-semibold text-blue-300">Custom SSL Certificate Config</h2>
-        <p class="text-sm text-slate-400">Specify custom SSL credentials to overwrite Wails automatic self-signed configuration. Changes apply instantly without server restart.</p>
-        
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div class="flex flex-col gap-2">
-            <label class="text-xs uppercase font-semibold text-slate-400">Certificate File (.crt / .pem)</label>
-            <div class="flex gap-2">
-              <input v-model="customCertPath" type="text" placeholder="Not specified (Using self-signed certificate)" class="flex-1 bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-sm outline-none" />
-              <button @click="handleBrowseCert" class="px-3 bg-slate-700 hover:bg-slate-600 text-sm rounded-md transition-colors whitespace-nowrap">Browse</button>
-            </div>
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-700/60 pb-3">
+          <div>
+            <h2 class="text-xl font-semibold text-blue-300 flex items-center gap-2">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+              SSL / TLS 數位簽章與憑證設定
+            </h2>
+            <p class="text-xs text-slate-400 mt-1">選擇適合的 HTTPS 憑證模式，變更套用即時生效無須重啟伺服器。</p>
           </div>
-          <div class="flex flex-col gap-2">
-            <label class="text-xs uppercase font-semibold text-slate-400">Private Key File (.key / .pem)</label>
-            <div class="flex gap-2">
-              <input v-model="customKeyPath" type="text" placeholder="Not specified (Using self-signed certificate)" class="flex-1 bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-sm outline-none" />
-              <button @click="handleBrowseKey" class="px-3 bg-slate-700 hover:bg-slate-600 text-sm rounded-md transition-colors whitespace-nowrap">Browse</button>
+
+          <!-- 模式切換按鈕組 -->
+          <div class="inline-flex bg-slate-900 p-1 rounded-lg border border-slate-700/80 text-xs font-medium self-start sm:self-auto">
+            <button 
+              @click="certMode = 'self-signed'"
+              :class="certMode === 'self-signed' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'"
+              class="px-3 py-1.5 rounded-md transition-all whitespace-nowrap flex items-center gap-1.5">
+              🛡️ 自簽憑證
+            </button>
+            <button 
+              @click="certMode = 'custom'"
+              :class="certMode === 'custom' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'"
+              class="px-3 py-1.5 rounded-md transition-all whitespace-nowrap flex items-center gap-1.5">
+              📁 手動匯入
+            </button>
+            <button 
+              @click="certMode = 'acme'"
+              :class="certMode === 'acme' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'"
+              class="px-3 py-1.5 rounded-md transition-all whitespace-nowrap flex items-center gap-1.5">
+              🌐 Let's Encrypt 自動
+            </button>
+          </div>
+        </div>
+
+        <!-- 模式 1: 自簽憑證說明 -->
+        <div v-if="certMode === 'self-signed'" class="bg-slate-900/60 border border-slate-700/50 rounded-lg p-4 flex flex-col gap-2">
+          <div class="flex items-center gap-2 text-slate-200 font-medium text-sm">
+            <span class="text-emerald-400">● 模式啟用中：</span> 動態生成自簽 SSL 憑證 (Self-Signed)
+          </div>
+          <p class="text-xs text-slate-400 leading-relaxed">
+            此為系統開箱預設模式。系統會在內部動態生成金鑰與憑證，極適合內網開發測試。
+            <br/><span class="text-amber-400/90">注意：初次以瀏覽器開啟時會出現「安全性警告/不安全網站」，點擊繼續存取即可正常運作。</span>
+          </p>
+        </div>
+
+        <!-- 模式 2: 手動匯入憑證 (.crt / .key) -->
+        <div v-if="certMode === 'custom'" class="flex flex-col gap-3">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="flex flex-col gap-2">
+              <label class="text-xs uppercase font-semibold text-slate-400">Certificate File (.crt / .pem)</label>
+              <div class="flex gap-2">
+                <input v-model="customCertPath" type="text" placeholder="選取憑證檔案 (.crt / .pem)" class="flex-1 bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-sm outline-none text-slate-200 focus:border-blue-500" />
+                <button @click="handleBrowseCert" class="px-3 bg-slate-700 hover:bg-slate-600 text-sm rounded-md transition-colors whitespace-nowrap">Browse</button>
+              </div>
+            </div>
+            <div class="flex flex-col gap-2">
+              <label class="text-xs uppercase font-semibold text-slate-400">Private Key File (.key / .pem)</label>
+              <div class="flex gap-2">
+                <input v-model="customKeyPath" type="text" placeholder="選取私鑰檔案 (.key / .pem)" class="flex-1 bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-sm outline-none text-slate-200 focus:border-blue-500" />
+                <button @click="handleBrowseKey" class="px-3 bg-slate-700 hover:bg-slate-600 text-sm rounded-md transition-colors whitespace-nowrap">Browse</button>
+              </div>
             </div>
           </div>
         </div>
 
-        <div class="flex justify-end gap-3 mt-2">
-          <button @click="handleClearCert" class="px-4 py-2 border border-rose-500/50 hover:bg-rose-500/10 text-rose-400 font-semibold text-sm rounded-md transition-colors">Uninstall Cert</button>
-          <button @click="handleApplyCert" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm rounded-md transition-colors">Apply Cert Config</button>
+        <!-- 模式 3: Let's Encrypt ACME 自動憑證 -->
+        <div v-if="certMode === 'acme'" class="flex flex-col gap-4">
+          <div class="bg-blue-950/40 border border-blue-800/40 rounded-lg p-3 text-xs text-blue-200/90 leading-relaxed">
+            💡 <strong>Let's Encrypt 自動簽發與 90天自動定時續約機制：</strong><br/>
+            系統將透過標準 ACME 協議向 Let's Encrypt 自動申請權威憑證，瀏覽器開啟時將呈現受信任的鎖頭且<strong>完全不跳不安全警告</strong>。
+            <br/><span class="text-slate-300">前置需求：請確認所填寫域名的 A 記錄已指向本伺服器的公網 IP，且 Port 80 與 Port 443 已開放。</span>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="flex flex-col gap-2">
+              <label class="text-xs uppercase font-semibold text-slate-400">網域名稱 (Domain Names)</label>
+              <input v-model="acmeDomain" type="text" placeholder="例如: example.com, api.example.com" class="bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-sm outline-none text-slate-200 focus:border-blue-500" />
+              <span class="text-[11px] text-slate-500">多個域名請使用半形逗號 (,) 分隔。</span>
+            </div>
+            <div class="flex flex-col gap-2">
+              <label class="text-xs uppercase font-semibold text-slate-400">緊急通知信箱 (Contact Email)</label>
+              <input v-model="acmeEmail" type="text" placeholder="例如: admin@example.com" class="bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-sm outline-none text-slate-200 focus:border-blue-500" />
+              <span class="text-[11px] text-slate-500">僅用於憑證即將過期之系統自動通知，無需密碼。</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 即時簽章/憑證狀態卡片 -->
+        <div v-if="certStatus" class="rounded-lg p-3 text-xs border transition-all"
+             :class="{
+               'bg-emerald-950/40 border-emerald-700/50 text-emerald-300': certStatus.isActive,
+               'bg-amber-950/40 border-amber-700/50 text-amber-300': !certStatus.isActive && certStatus.mode === 'acme',
+               'bg-slate-900 border-slate-700 text-slate-300': !certStatus.isActive && certStatus.mode !== 'acme'
+             }">
+          <div class="font-semibold flex items-center justify-between">
+            <span>憑證簽章即時狀態：</span>
+            <span v-if="certStatus.isActive && certStatus.notAfter" class="text-[11px] opacity-80">到期時間：{{ certStatus.notAfter }} (剩餘 {{ certStatus.daysRemaining }} 天)</span>
+          </div>
+          <div class="mt-1 leading-relaxed opacity-90">{{ certStatus.message }}</div>
+        </div>
+
+        <div class="flex justify-end gap-3 mt-2 pt-3 border-t border-slate-700/60">
+          <button @click="handleClearCert" class="px-4 py-2 border border-rose-500/50 hover:bg-rose-500/10 text-rose-400 font-semibold text-sm rounded-md transition-colors">還原自簽憑證</button>
+          <button @click="handleApplyCert" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm rounded-md transition-colors flex items-center gap-1.5">
+            儲存並套用憑證設定
+          </button>
         </div>
       </section>
     </transition>

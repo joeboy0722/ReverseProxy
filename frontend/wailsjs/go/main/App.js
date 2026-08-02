@@ -14,6 +14,10 @@ export function DeleteRule(arg1) {
   return window['go']['main']['App']['DeleteRule'](arg1);
 }
 
+export function GetCertStatus() {
+  return window['go']['main']['App']['GetCertStatus']();
+}
+
 export function GetCustomCert() {
   return window['go']['main']['App']['GetCustomCert']();
 }
@@ -48,6 +52,10 @@ export function SelectDirectory() {
 
 export function SelectFile(arg1, arg2) {
   return window['go']['main']['App']['SelectFile'](arg1, arg2);
+}
+
+export function SetCertConfig(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['SetCertConfig'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function SetCustomCert(arg1, arg2) {

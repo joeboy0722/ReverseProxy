@@ -10,6 +10,9 @@ import (
 type ProxyConfig struct {
 	CertPath    string `json:"certPath"`
 	KeyPath     string `json:"keyPath"`
+	CertMode    string `json:"certMode"`    // 憑證模式: "self-signed", "custom", "acme"
+	ACMEDomain  string `json:"acmeDomain"`  // Let's Encrypt 自動憑證綁定網域
+	ACMEEmail   string `json:"acmeEmail"`   // Let's Encrypt 緊急通知信箱
 	NavTitle    string `json:"navTitle"`
 	NavSubtitle string `json:"navSubtitle"`
 	ThemeColor  string `json:"themeColor"`
